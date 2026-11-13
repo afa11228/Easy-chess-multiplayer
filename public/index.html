@@ -14,16 +14,27 @@
     font-family:'Caveat', cursive; color:#1e4fa3;
     background:#f6f1e3 radial-gradient(ellipse at center, #fbf7ec 0%, #efe8d4 100%);
   }
-  h1 { margin:0; font-size:38px; transform:rotate(-1.5deg); }
+  h1 { margin:0; font-size:38px; transform:rotate(-1.5deg); text-align: center; }
   input, button {
     font-family:'Caveat', cursive; font-size:20px; font-weight:600;
     color:#1e4fa3; background:rgba(255,255,255,0.35);
     border:2px solid #1e4fa3; border-radius:16px 10px 16px 10px;
-    padding:8px 18px; margin-top: 10px;
+    padding:8px 18px; margin-top: 10px; text-align: center;
   }
   button { cursor:pointer; }
   button:hover { background: rgba(30, 79, 163, 0.08); }
-  #status { font-size:23px; font-weight:600; min-height:28px; text-align:center; }
+  input:read-only { opacity: 0.6; border-style: dashed; cursor: not-allowed; }
+  
+  #status { font-size:23px; font-weight:600; min-height:28px; text-align:center; max-width: 320px;}
+  
+  /* Name Header */
+  #game-header {
+    display: none; font-size: 22px; font-weight: 700; text-align: center;
+    background: rgba(30, 79, 163, 0.1); padding: 8px 16px; 
+    border-radius: 10px; border: 2px dashed rgba(30, 79, 163, 0.5);
+  }
+  #game-header span { color: #d32f2f; }
+
   #board {
     display:grid; grid-template-columns:repeat(3, minmax(84px,104px));
     grid-template-rows:repeat(3, minmax(84px,104px));
@@ -46,7 +57,6 @@
   .cell.win { animation:pen 0.9s ease-in-out infinite; }
   @keyframes pen { 50% { background:rgba(200,60,60,0.20); } }
   
-  /* UI Panels */
   .panel { display: flex; flex-direction: column; align-items: center; gap: 10px; }
   #rename-area { display: none; flex-direction: column; align-items: center; gap: 10px; margin-top: 10px; }
 </style>
@@ -54,18 +64,20 @@
 <body>
   <h1>Easy Chess Multiplayer</h1>
   
+  <!-- Shows names during game -->
+  <div id="game-header">
+    You: <span id="my-name">...</span> vs Opponent: <span id="opp-name">...</span>
+  </div>
+
   <div id="status">Enter a name to start</div>
   
-  <!-- Name Entry Screen -->
   <div id="setup-area" class="panel">
     <input type="text" id="username-input" placeholder="Your Username" maxlength="15">
     <button id="find">Find Match</button>
   </div>
 
-  <!-- The Game Board -->
   <div id="board"></div>
 
-  <!-- Winner Rename Area -->
   <div id="rename-area" class="panel">
     <div id="rename-text" style="font-size: 22px;"></div>
     <input type="text" id="new-name-input" placeholder="New name for loser" maxlength="15">
@@ -73,7 +85,6 @@
     <button id="mercy-btn">Show Mercy</button>
   </div>
 
-  <!-- Play Again Button -->
   <button id="play-again" style="display:none;">Play Again</button>
 
 <script>
@@ -91,6 +102,9 @@ const newNameInput = document.getElementById('new-name-input');
 const submitRenameBtn = document.getElementById('submit-rename');
 const mercyBtn = document.getElementById('mercy-btn');
 const playAgainBtn = document.getElementById('play-again');
+const gameHeader = document.getElementById('game-header');
+const myNameEl = document.getElementById('my-name');
+const oppNameEl = document.getElementById('opp-name');
 
 let roomId = null, mySymbol = null;
 let board = Array(9).fill(null), phase = 'placement', turn = 'X';
@@ -100,7 +114,9 @@ let selected = null, gameOver = false, winningLine = [];
 const savedName = localStorage.getItem('myGameUsername');
 if (savedName) {
   usernameInput.value = savedName;
-  statusEl.textContent = `Welcome back, ${savedName}`;
+  usernameInput.readOnly = true; // PERMANENTLY LOCK THE INPUT
+  statusEl.textContent = `Welcome back, ${savedName}. Your name is locked.`;
+  findBtn.textContent = "Find Match as " + savedName;
 }
 
 findBtn.onclick = () => {
@@ -117,9 +133,14 @@ socket.on('waiting', () => {
   statusEl.textContent = 'Waiting for opponent…';
 });
 
-socket.on('match-found', ({ roomId: rid, symbol, opponentName }) => {
+socket.on('match-found', ({ roomId: rid, symbol, myName, opponentName }) => {
   roomId = rid; mySymbol = symbol; gameOver = false; selected = null;
-  statusEl.textContent = `You are ${symbol} vs ${opponentName}`;
+  statusEl.textContent = 'Game Started!';
+  
+  // Show names on screen
+  gameHeader.style.display = 'block';
+  myNameEl.textContent = myName;
+  oppNameEl.textContent = opponentName;
 });
 
 socket.on('game-state', (state) => {
@@ -138,37 +159,34 @@ socket.on('game-over', ({ board: b, winner, winnerName, loserName }) => {
   render();
   
   if (winner === mySymbol) {
-    // I am the winner
     statusEl.textContent = 'You win!';
     renameArea.style.display = 'flex';
     renameText.textContent = `You beat ${loserName}. Rename them or show mercy:`;
   } else {
-    // I am the loser
     statusEl.textContent = 'You lose. Waiting for winner to decide your fate…';
     playAgainBtn.style.display = 'block';
   }
 });
 
-// When the winner submits a new name
 submitRenameBtn.onclick = () => {
   const newName = newNameInput.value.trim();
   if (!newName) return alert("Type a name!");
-  socket.emit('rename-loser', { roomId, newName });
+  const loserSymbol = mySymbol === 'X' ? 'O' : 'X';
+  socket.emit('rename-loser', { roomId, newName, loserSymbol });
   renameArea.style.display = 'none';
   statusEl.textContent = `You renamed them to ${newName}!`;
   playAgainBtn.style.display = 'block';
 };
 
-// If the winner clicks Mercy
 mercyBtn.onclick = () => {
   renameArea.style.display = 'none';
   statusEl.textContent = 'You showed mercy.';
   playAgainBtn.style.display = 'block';
 };
 
-// What happens on the LOSER'S screen when the winner renames them
+// The loser receives this
 socket.on('force-rename', (newName) => {
-  localStorage.setItem('myGameUsername', newName); // Permanently change their local name
+  localStorage.setItem('myGameUsername', newName); // Permanently lock new name
   usernameInput.value = newName;
   statusEl.textContent = `The winner renamed you to: ${newName}!`;
   playAgainBtn.style.display = 'block';
