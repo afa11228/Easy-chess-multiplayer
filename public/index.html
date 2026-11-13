@@ -165,9 +165,13 @@ async function connectVoice(token) {
     const LivekitClient = window.LivekitClient;
     livekitRoom = new LivekitClient.Room();
     
-    // THIS IS WHERE YOUR URL IS NOW HARDCODED
+    // 1. Ask for mic permission FIRST
+    await navigator.mediaDevices.getUserMedia({ audio: true });
+    
+    // 2. Then connect to LiveKit
     await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token);
     
+    // 3. Turn on the mic
     await livekitRoom.localParticipant.setMicrophoneEnabled(true);
     
     voiceControls.style.display = 'flex';
