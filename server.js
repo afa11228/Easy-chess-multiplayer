@@ -18,18 +18,28 @@ function checkWin(b) {
 }
 
 io.on('connection', (socket) => {
-  socket.on('find-match', () => {
+  socket.on('find-match', (username) => {
     if (waiting && waiting.connected && waiting.id !== socket.id) {
       const roomId = 'r-' + Date.now();
-      const room = { board: Array(9).fill(null), phase: 'placement', turn: 'X',
-                     players: { X: waiting, O: socket } };
+      const room = { 
+        board: Array(9).fill(null), 
+        phase: 'placement', 
+        turn: 'X',
+        players: { 
+          X: { id: waiting.id, username: waiting.username }, 
+          O: { id: socket.id, username: username } 
+        } 
+      };
       rooms.set(roomId, room);
       waiting.join(roomId); socket.join(roomId);
-      waiting.emit('match-found', { roomId, symbol: 'X' });
-      socket.emit('match-found', { roomId, symbol: 'O' });
+      
+      waiting.emit('match-found', { roomId, symbol: 'X', opponentName: username });
+      socket.emit('match-found', { roomId, symbol: 'O', opponentName: waiting.username });
+      
       io.to(roomId).emit('game-state', { board: room.board, phase: room.phase, turn: room.turn });
       waiting = null;
     } else {
+      socket.username = username;
       waiting = socket;
       socket.emit('waiting');
     }
@@ -48,11 +58,23 @@ io.on('connection', (socket) => {
       if (room.board[from] !== sym || room.board[to] !== null) return;
       room.board[from] = null; room.board[to] = sym;
     }
+    
     const w = checkWin(room.board);
-    if (w) return io.to(roomId).emit('game-over', { board: room.board, winner: w });
+    if (w) {
+      const winnerName = room.players[w].username;
+      const loserSym = w === 'X' ? 'O' : 'X';
+      const loserName = room.players[loserSym].username;
+      return io.to(roomId).emit('game-over', { board: room.board, winner: w, winnerName, loserName });
+    }
+    
     if (room.board.filter(Boolean).length === 6) room.phase = 'movement';
     room.turn = room.turn === 'X' ? 'O' : 'X';
     io.to(roomId).emit('game-state', { board: room.board, phase: room.phase, turn: room.turn });
+  });
+
+  // New: Winner renames loser
+  socket.on('rename-loser', ({ roomId, newName }) => {
+    io.to(roomId).emit('force-rename', newName);
   });
 
   socket.on('disconnect', () => {
