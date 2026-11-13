@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const { AccessToken } = require('livekit-server-sdk');
 
 const app = express();
 const server = http.createServer(app);
@@ -15,6 +16,14 @@ const rooms = new Map();
 function checkWin(b) {
   for (const [a,x,c] of LINES) if (b[a] && b[a] === b[x] && b[a] === b[c]) return b[a];
   return null;
+}
+
+async function generateToken(roomName, participantName) {
+  const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
+    identity: participantName,
+  });
+  at.addGrant({ roomJoin: true, room: roomName });
+  return await at.toJwt();
 }
 
 io.on('connection', (socket) => {
@@ -33,11 +42,16 @@ io.on('connection', (socket) => {
       rooms.set(roomId, room);
       waiting.join(roomId); socket.join(roomId);
       
-      waiting.emit('match-found', { roomId, symbol: 'X', myName: waiting.username, opponentName: username });
-      socket.emit('match-found', { roomId, symbol: 'O', myName: username, opponentName: waiting.username });
-      
-      io.to(roomId).emit('game-state', { board: room.board, phase: room.phase, turn: room.turn });
-      waiting = null;
+      Promise.all([
+        generateToken(roomId, waiting.username),
+        generateToken(roomId, username)
+      ]).then(([tokenX, tokenO]) => {
+        waiting.emit('match-found', { roomId, symbol: 'X', myName: waiting.username, opponentName: username, livekitToken: tokenX });
+        socket.emit('match-found', { roomId, symbol: 'O', myName: username, opponentName: waiting.username, livekitToken: tokenO });
+        
+        io.to(roomId).emit('game-state', { board: room.board, phase: room.phase, turn: room.turn });
+        waiting = null;
+      });
     } else {
       socket.username = username;
       waiting = socket;
@@ -72,7 +86,6 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('game-state', { board: room.board, phase: room.phase, turn: room.turn });
   });
 
-  // New: Only send the rename command to the loser
   socket.on('rename-loser', ({ roomId, newName, loserSymbol }) => {
     const room = rooms.get(roomId);
     if (!room) return;
@@ -93,4 +106,6 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(process.env.PORT || 3000, () => console.log('server up'));
+// THIS IS THE FIX FOR FLY.IO (It forces port 3000 and binds to 0.0.0.0)
+const PORT = 3000;
+server.listen(PORT, '0.0.0.0', () => console.log('server up on port ' + PORT));
