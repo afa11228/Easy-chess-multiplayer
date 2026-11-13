@@ -106,6 +106,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// THIS IS THE FIX FOR FLY.IO (It forces port 3000 and binds to 0.0.0.0)
-const PORT = 3000;
-server.listen(PORT, '0.0.0.0', () => console.log('server up on port ' + PORT));
+// Back to standard Render port
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log('server up on port ' + PORT));
