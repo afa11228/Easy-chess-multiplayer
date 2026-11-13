@@ -6,11 +6,12 @@
 <title>Easy Chess Multiplayer</title>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Kalam:wght@700&display=swap" rel="stylesheet">
 <script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body {
     margin:0; min-height:100vh; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; gap:16px; padding:20px;
+    align-items:center; justify-content:center; gap:12px; padding:20px;
     font-family:'Caveat', cursive; color:#1e4fa3;
     background:#f6f1e3 radial-gradient(ellipse at center, #fbf7ec 0%, #efe8d4 100%);
   }
@@ -24,16 +25,23 @@
   button { cursor:pointer; }
   button:hover { background: rgba(30, 79, 163, 0.08); }
   input:read-only { opacity: 0.6; border-style: dashed; cursor: not-allowed; }
-  
   #status { font-size:23px; font-weight:600; min-height:28px; text-align:center; max-width: 320px;}
   
-  /* Name Header */
   #game-header {
     display: none; font-size: 22px; font-weight: 700; text-align: center;
     background: rgba(30, 79, 163, 0.1); padding: 8px 16px; 
     border-radius: 10px; border: 2px dashed rgba(30, 79, 163, 0.5);
   }
   #game-header span { color: #d32f2f; }
+
+  #voice-controls {
+    display: none; gap: 10px; margin-top: 10px;
+  }
+  #mic-btn {
+    background: #e0f2f1; border-color: #00796b; color: #00796b;
+    margin-top: 0; padding: 8px 16px; font-size: 18px;
+  }
+  #mic-btn.muted { background: #ffebee; border-color: #c62828; color: #c62828; }
 
   #board {
     display:grid; grid-template-columns:repeat(3, minmax(84px,104px));
@@ -44,6 +52,7 @@
     background-size:2px 100%,2px 100%,100% 2px,100% 2px;
     background-position:33.333% 0,66.666% 0,0 33.333%,0 66.666%;
     background-repeat:no-repeat; transform:rotate(-0.6deg);
+    margin-top: 10px;
   }
   .cell {
     display:flex; align-items:center; justify-content:center;
@@ -64,7 +73,6 @@
 <body>
   <h1>Easy Chess Multiplayer</h1>
   
-  <!-- Shows names during game -->
   <div id="game-header">
     You: <span id="my-name">...</span> vs Opponent: <span id="opp-name">...</span>
   </div>
@@ -74,6 +82,10 @@
   <div id="setup-area" class="panel">
     <input type="text" id="username-input" placeholder="Your Username" maxlength="15">
     <button id="find">Find Match</button>
+  </div>
+
+  <div id="voice-controls">
+    <button id="mic-btn">🎤 Mic On</button>
   </div>
 
   <div id="board"></div>
@@ -105,16 +117,21 @@ const playAgainBtn = document.getElementById('play-again');
 const gameHeader = document.getElementById('game-header');
 const myNameEl = document.getElementById('my-name');
 const oppNameEl = document.getElementById('opp-name');
+const voiceControls = document.getElementById('voice-controls');
+const micBtn = document.getElementById('mic-btn');
 
 let roomId = null, mySymbol = null;
 let board = Array(9).fill(null), phase = 'placement', turn = 'X';
 let selected = null, gameOver = false, winningLine = [];
 
-// Load saved username if it exists
+let livekitRoom = null;
+let isMicMuted = false;
+let remoteAudioElements = [];
+
 const savedName = localStorage.getItem('myGameUsername');
 if (savedName) {
   usernameInput.value = savedName;
-  usernameInput.readOnly = true; // PERMANENTLY LOCK THE INPUT
+  usernameInput.readOnly = true;
   statusEl.textContent = `Welcome back, ${savedName}. Your name is locked.`;
   findBtn.textContent = "Find Match as " + savedName;
 }
@@ -122,7 +139,6 @@ if (savedName) {
 findBtn.onclick = () => {
   const username = usernameInput.value.trim();
   if (!username) return alert("Please enter a name!");
-  
   localStorage.setItem('myGameUsername', username);
   setupArea.style.display = 'none';
   socket.emit('find-match', username);
@@ -133,15 +149,74 @@ socket.on('waiting', () => {
   statusEl.textContent = 'Waiting for opponent…';
 });
 
-socket.on('match-found', ({ roomId: rid, symbol, myName, opponentName }) => {
+socket.on('match-found', ({ roomId: rid, symbol, myName, opponentName, livekitToken }) => {
   roomId = rid; mySymbol = symbol; gameOver = false; selected = null;
   statusEl.textContent = 'Game Started!';
   
-  // Show names on screen
   gameHeader.style.display = 'block';
   myNameEl.textContent = myName;
   oppNameEl.textContent = opponentName;
+  
+  connectVoice(livekitToken);
 });
+
+async function connectVoice(token) {
+  try {
+    const LivekitClient = window.LivekitClient;
+    livekitRoom = new LivekitClient.Room();
+    
+    // THIS IS WHERE YOUR URL IS NOW HARDCODED
+    await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token);
+    
+    await livekitRoom.localParticipant.setMicrophoneEnabled(true);
+    
+    voiceControls.style.display = 'flex';
+    isMicMuted = false;
+    micBtn.textContent = '🎤 Mic On';
+    micBtn.classList.remove('muted');
+
+    livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+      if (track.kind === 'audio') {
+        const audioEl = track.attach();
+        audioEl.autoplay = true;
+        document.body.appendChild(audioEl);
+        remoteAudioElements.push(audioEl);
+      }
+    });
+
+    livekitRoom.on(LivekitClient.RoomEvent.ParticipantDisconnected, () => {
+      statusEl.textContent = 'Opponent left voice chat.';
+    });
+
+  } catch (err) {
+    console.error("Voice connection failed:", err);
+    statusEl.textContent = 'Voice chat failed to connect.';
+  }
+}
+
+micBtn.onclick = async () => {
+  if (!livekitRoom) return;
+  isMicMuted = !isMicMuted;
+  await livekitRoom.localParticipant.setMicrophoneEnabled(!isMicMuted);
+  
+  if (isMicMuted) {
+    micBtn.textContent = '🔇 Mic Muted';
+    micBtn.classList.add('muted');
+  } else {
+    micBtn.textContent = '🎤 Mic On';
+    micBtn.classList.remove('muted');
+  }
+};
+
+function disconnectVoice() {
+  if (livekitRoom) {
+    livekitRoom.disconnect();
+    livekitRoom = null;
+  }
+  remoteAudioElements.forEach(el => el.remove());
+  remoteAudioElements = [];
+  voiceControls.style.display = 'none';
+}
 
 socket.on('game-state', (state) => {
   board = state.board; phase = state.phase; turn = state.turn;
@@ -184,21 +259,22 @@ mercyBtn.onclick = () => {
   playAgainBtn.style.display = 'block';
 };
 
-// The loser receives this
 socket.on('force-rename', (newName) => {
-  localStorage.setItem('myGameUsername', newName); // Permanently lock new name
+  localStorage.setItem('myGameUsername', newName);
   usernameInput.value = newName;
   statusEl.textContent = `The winner renamed you to: ${newName}!`;
   playAgainBtn.style.display = 'block';
 });
 
 playAgainBtn.onclick = () => {
+  disconnectVoice();
   window.location.reload();
 };
 
 socket.on('opponent-left', () => {
   statusEl.textContent = 'Opponent left.';
   gameOver = true;
+  disconnectVoice();
   playAgainBtn.style.display = 'block';
 });
 
