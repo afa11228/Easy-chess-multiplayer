@@ -14,13 +14,14 @@
     font-family:'Caveat', cursive; color:#1e4fa3;
     background:#f6f1e3 radial-gradient(ellipse at center, #fbf7ec 0%, #efe8d4 100%);
   }
-  h1 { margin:0; font-size:40px; transform:rotate(-1.5deg); }
-  button {
+  h1 { margin:0; font-size:38px; transform:rotate(-1.5deg); }
+  input, button {
     font-family:'Caveat', cursive; font-size:20px; font-weight:600;
     color:#1e4fa3; background:rgba(255,255,255,0.35);
     border:2px solid #1e4fa3; border-radius:16px 10px 16px 10px;
-    padding:8px 22px; cursor:pointer; margin-top: 10px;
+    padding:8px 18px; margin-top: 10px;
   }
+  button { cursor:pointer; }
   button:hover { background: rgba(30, 79, 163, 0.08); }
   #status { font-size:23px; font-weight:600; min-height:28px; text-align:center; }
   #board {
@@ -44,13 +45,36 @@
   .cell.selected { outline:2px dashed rgba(30,79,163,0.75); outline-offset:-7px; }
   .cell.win { animation:pen 0.9s ease-in-out infinite; }
   @keyframes pen { 50% { background:rgba(200,60,60,0.20); } }
+  
+  /* UI Panels */
+  .panel { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #rename-area { display: none; flex-direction: column; align-items: center; gap: 10px; margin-top: 10px; }
 </style>
 </head>
 <body>
-  <h1>Easy Chess multiplayer</h1>
-  <div id="status">Tap Find Match</div>
+  <h1>Easy Chess Multiplayer</h1>
+  
+  <div id="status">Enter a name to start</div>
+  
+  <!-- Name Entry Screen -->
+  <div id="setup-area" class="panel">
+    <input type="text" id="username-input" placeholder="Your Username" maxlength="15">
+    <button id="find">Find Match</button>
+  </div>
+
+  <!-- The Game Board -->
   <div id="board"></div>
-  <button id="find">Find Match</button>
+
+  <!-- Winner Rename Area -->
+  <div id="rename-area" class="panel">
+    <div id="rename-text" style="font-size: 22px;"></div>
+    <input type="text" id="new-name-input" placeholder="New name for loser" maxlength="15">
+    <button id="submit-rename">Rename Loser</button>
+    <button id="mercy-btn">Show Mercy</button>
+  </div>
+
+  <!-- Play Again Button -->
+  <button id="play-again" style="display:none;">Play Again</button>
 
 <script>
 const socket = io();
@@ -59,29 +83,43 @@ const LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const boardEl = document.getElementById('board');
 const statusEl = document.getElementById('status');
 const findBtn = document.getElementById('find');
+const setupArea = document.getElementById('setup-area');
+const usernameInput = document.getElementById('username-input');
+const renameArea = document.getElementById('rename-area');
+const renameText = document.getElementById('rename-text');
+const newNameInput = document.getElementById('new-name-input');
+const submitRenameBtn = document.getElementById('submit-rename');
+const mercyBtn = document.getElementById('mercy-btn');
+const playAgainBtn = document.getElementById('play-again');
 
 let roomId = null, mySymbol = null;
 let board = Array(9).fill(null), phase = 'placement', turn = 'X';
 let selected = null, gameOver = false, winningLine = [];
 
+// Load saved username if it exists
+const savedName = localStorage.getItem('myGameUsername');
+if (savedName) {
+  usernameInput.value = savedName;
+  statusEl.textContent = `Welcome back, ${savedName}`;
+}
+
 findBtn.onclick = () => {
-  if (gameOver) {
-    window.location.reload(); // Refreshes the page for a brand new match
-    return;
-  }
-  socket.emit('find-match');
+  const username = usernameInput.value.trim();
+  if (!username) return alert("Please enter a name!");
+  
+  localStorage.setItem('myGameUsername', username);
+  setupArea.style.display = 'none';
+  socket.emit('find-match', username);
   statusEl.textContent = 'Searching for a stranger…';
-  findBtn.disabled = true;
 };
 
 socket.on('waiting', () => {
   statusEl.textContent = 'Waiting for opponent…';
 });
 
-socket.on('match-found', ({ roomId: rid, symbol }) => {
+socket.on('match-found', ({ roomId: rid, symbol, opponentName }) => {
   roomId = rid; mySymbol = symbol; gameOver = false; selected = null;
-  statusEl.textContent = 'You are ' + symbol;
-  findBtn.style.display = 'none';
+  statusEl.textContent = `You are ${symbol} vs ${opponentName}`;
 });
 
 socket.on('game-state', (state) => {
@@ -90,7 +128,7 @@ socket.on('game-state', (state) => {
   render(); updateStatus();
 });
 
-socket.on('game-over', ({ board: b, winner }) => {
+socket.on('game-over', ({ board: b, winner, winnerName, loserName }) => {
   board = b; gameOver = true;
   for (const line of LINES) {
     if (b[line[0]] === winner && b[line[1]] === winner && b[line[2]] === winner) {
@@ -98,20 +136,52 @@ socket.on('game-over', ({ board: b, winner }) => {
     }
   }
   render();
-  statusEl.textContent = winner === mySymbol ? 'You win!' : 'You lose.';
   
-  // Show the button again for a new match
-  findBtn.style.display = 'block';
-  findBtn.textContent = 'Play Again';
-  findBtn.disabled = false;
+  if (winner === mySymbol) {
+    // I am the winner
+    statusEl.textContent = 'You win!';
+    renameArea.style.display = 'flex';
+    renameText.textContent = `You beat ${loserName}. Rename them or show mercy:`;
+  } else {
+    // I am the loser
+    statusEl.textContent = 'You lose. Waiting for winner to decide your fate…';
+    playAgainBtn.style.display = 'block';
+  }
 });
+
+// When the winner submits a new name
+submitRenameBtn.onclick = () => {
+  const newName = newNameInput.value.trim();
+  if (!newName) return alert("Type a name!");
+  socket.emit('rename-loser', { roomId, newName });
+  renameArea.style.display = 'none';
+  statusEl.textContent = `You renamed them to ${newName}!`;
+  playAgainBtn.style.display = 'block';
+};
+
+// If the winner clicks Mercy
+mercyBtn.onclick = () => {
+  renameArea.style.display = 'none';
+  statusEl.textContent = 'You showed mercy.';
+  playAgainBtn.style.display = 'block';
+};
+
+// What happens on the LOSER'S screen when the winner renames them
+socket.on('force-rename', (newName) => {
+  localStorage.setItem('myGameUsername', newName); // Permanently change their local name
+  usernameInput.value = newName;
+  statusEl.textContent = `The winner renamed you to: ${newName}!`;
+  playAgainBtn.style.display = 'block';
+});
+
+playAgainBtn.onclick = () => {
+  window.location.reload();
+};
 
 socket.on('opponent-left', () => {
   statusEl.textContent = 'Opponent left.';
   gameOver = true;
-  findBtn.style.display = 'block';
-  findBtn.textContent = 'Find New Match';
-  findBtn.disabled = false;
+  playAgainBtn.style.display = 'block';
 });
 
 function render() {
