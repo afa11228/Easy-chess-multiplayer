@@ -168,8 +168,12 @@ async function connectVoice(token) {
     // 1. Ask for mic permission FIRST
     await navigator.mediaDevices.getUserMedia({ audio: true });
     
-    // 2. Then connect to LiveKit
-    await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token);
+    // 2. Connect to LiveKit and FORCE TURN RELAY
+    await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token, {
+      rtcConfig: {
+        iceTransportPolicy: 'relay' // THIS BYPASSES THE BLOCK
+      }
+    });
     
     // 3. Turn on the mic
     await livekitRoom.localParticipant.setMicrophoneEnabled(true);
