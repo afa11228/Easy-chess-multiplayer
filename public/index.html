@@ -16,14 +16,14 @@
     background:#f6f1e3 radial-gradient(ellipse at center, #fbf7ec 0%, #efe8d4 100%);
   }
   h1 { margin:0; font-size:38px; transform:rotate(-1.5deg); text-align: center; }
-  input, button {
+  input, button:not(#mic-btn) {
     font-family:'Caveat', cursive; font-size:20px; font-weight:600;
     color:#1e4fa3; background:rgba(255,255,255,0.35);
     border:2px solid #1e4fa3; border-radius:16px 10px 16px 10px;
     padding:8px 18px; margin-top: 10px; text-align: center;
   }
-  button { cursor:pointer; }
-  button:hover { background: rgba(30, 79, 163, 0.08); }
+  button:not(#mic-btn) { cursor:pointer; }
+  button:not(#mic-btn):hover { background: rgba(30, 79, 163, 0.08); }
   input:read-only { opacity: 0.6; border-style: dashed; cursor: not-allowed; }
   #status { font-size:23px; font-weight:600; min-height:28px; text-align:center; max-width: 320px;}
   
@@ -34,14 +34,17 @@
   }
   #game-header span { color: #d32f2f; }
 
-  #voice-controls {
-    display: none; gap: 10px; margin-top: 10px;
-  }
+  /* FLOATING MIC BUTTON */
   #mic-btn {
-    background: #e0f2f1; border-color: #00796b; color: #00796b;
-    margin-top: 0; padding: 8px 16px; font-size: 18px;
+    display: none; position: fixed; bottom: 20px; right: 20px;
+    width: 60px; height: 60px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9); border: 2px solid #1e4fa3;
+    font-size: 28px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    z-index: 1000; align-items: center; justify-content: center;
+    transition: transform 0.1s, background 0.2s;
   }
-  #mic-btn.muted { background: #ffebee; border-color: #c62828; color: #c62828; }
+  #mic-btn:active { transform: scale(0.95); }
+  #mic-btn.muted { background: #ffebee; border-color: #c62828; }
 
   #board {
     display:grid; grid-template-columns:repeat(3, minmax(84px,104px));
@@ -73,6 +76,9 @@
 <body>
   <h1>Easy Chess Multiplayer</h1>
   
+  <!-- THE SECRET SAUCE: A dedicated audio tag for the opponent's voice -->
+  <audio id="remote-audio" autoplay playsinline style="display:none;"></audio>
+
   <div id="game-header">
     You: <span id="my-name">...</span> vs Opponent: <span id="opp-name">...</span>
   </div>
@@ -84,9 +90,7 @@
     <button id="find">Find Match</button>
   </div>
 
-  <div id="voice-controls">
-    <button id="mic-btn">🎤 Mic On</button>
-  </div>
+  <button id="mic-btn">🔇</button>
 
   <div id="board"></div>
 
@@ -117,7 +121,6 @@ const playAgainBtn = document.getElementById('play-again');
 const gameHeader = document.getElementById('game-header');
 const myNameEl = document.getElementById('my-name');
 const oppNameEl = document.getElementById('opp-name');
-const voiceControls = document.getElementById('voice-controls');
 const micBtn = document.getElementById('mic-btn');
 
 let roomId = null, mySymbol = null;
@@ -125,8 +128,7 @@ let board = Array(9).fill(null), phase = 'placement', turn = 'X';
 let selected = null, gameOver = false, winningLine = [];
 
 let livekitRoom = null;
-let isMicMuted = false;
-let remoteAudioElements = [];
+let isMicMuted = true; // Starts muted!
 
 const savedName = localStorage.getItem('myGameUsername');
 if (savedName) {
@@ -165,30 +167,26 @@ async function connectVoice(token) {
     const LivekitClient = window.LivekitClient;
     livekitRoom = new LivekitClient.Room();
     
-    // 1. Ask for mic permission FIRST
     await navigator.mediaDevices.getUserMedia({ audio: true });
     
-    // 2. Connect to LiveKit and FORCE TURN RELAY
     await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token, {
       rtcConfig: {
-        iceTransportPolicy: 'relay' // THIS BYPASSES THE BLOCK
+        iceTransportPolicy: 'relay' // Bypasses VPN blocks
       }
     });
     
-    // 3. Turn on the mic
-    await livekitRoom.localParticipant.setMicrophoneEnabled(true);
+    await livekitRoom.localParticipant.setMicrophoneEnabled(false);
     
-    voiceControls.style.display = 'flex';
-    isMicMuted = false;
-    micBtn.textContent = '🎤 Mic On';
-    micBtn.classList.remove('muted');
+    micBtn.style.display = 'flex';
+    micBtn.textContent = '🔇';
+    micBtn.classList.add('muted');
 
+    // Attach opponent's voice to our dedicated <audio> tag
     livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
       if (track.kind === 'audio') {
-        const audioEl = track.attach();
-        audioEl.autoplay = true;
-        document.body.appendChild(audioEl);
-        remoteAudioElements.push(audioEl);
+        const audioEl = document.getElementById('remote-audio');
+        track.attach(audioEl);
+        audioEl.play().catch(e => console.log("Audio play blocked by browser:", e));
       }
     });
 
@@ -208,10 +206,10 @@ micBtn.onclick = async () => {
   await livekitRoom.localParticipant.setMicrophoneEnabled(!isMicMuted);
   
   if (isMicMuted) {
-    micBtn.textContent = '🔇 Mic Muted';
+    micBtn.textContent = '🔇';
     micBtn.classList.add('muted');
   } else {
-    micBtn.textContent = '🎤 Mic On';
+    micBtn.textContent = '🎤';
     micBtn.classList.remove('muted');
   }
 };
@@ -221,9 +219,7 @@ function disconnectVoice() {
     livekitRoom.disconnect();
     livekitRoom = null;
   }
-  remoteAudioElements.forEach(el => el.remove());
-  remoteAudioElements = [];
-  voiceControls.style.display = 'none';
+  micBtn.style.display = 'none';
 }
 
 socket.on('game-state', (state) => {
