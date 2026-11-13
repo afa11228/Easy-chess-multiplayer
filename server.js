@@ -33,8 +33,8 @@ io.on('connection', (socket) => {
       rooms.set(roomId, room);
       waiting.join(roomId); socket.join(roomId);
       
-      waiting.emit('match-found', { roomId, symbol: 'X', opponentName: username });
-      socket.emit('match-found', { roomId, symbol: 'O', opponentName: waiting.username });
+      waiting.emit('match-found', { roomId, symbol: 'X', myName: waiting.username, opponentName: username });
+      socket.emit('match-found', { roomId, symbol: 'O', myName: username, opponentName: waiting.username });
       
       io.to(roomId).emit('game-state', { board: room.board, phase: room.phase, turn: room.turn });
       waiting = null;
@@ -72,9 +72,14 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('game-state', { board: room.board, phase: room.phase, turn: room.turn });
   });
 
-  // New: Winner renames loser
-  socket.on('rename-loser', ({ roomId, newName }) => {
-    io.to(roomId).emit('force-rename', newName);
+  // New: Only send the rename command to the loser
+  socket.on('rename-loser', ({ roomId, newName, loserSymbol }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const loser = room.players[loserSymbol];
+    if (loser) {
+      io.to(loser.id).emit('force-rename', newName);
+    }
   });
 
   socket.on('disconnect', () => {
