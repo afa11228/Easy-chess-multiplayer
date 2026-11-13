@@ -45,6 +45,7 @@
   }
   #mic-btn:active { transform: scale(0.95); }
   #mic-btn.muted { background: #ffebee; border-color: #c62828; }
+  #mic-btn.error { background: #333; border-color: #000; color: white; font-size: 14px; text-align: center; }
 
   #board {
     display:grid; grid-template-columns:repeat(3, minmax(84px,104px));
@@ -76,7 +77,6 @@
 <body>
   <h1>Easy Chess Multiplayer</h1>
   
-  <!-- THE SECRET SAUCE: A dedicated audio tag for the opponent's voice -->
   <audio id="remote-audio" autoplay playsinline style="display:none;"></audio>
 
   <div id="game-header">
@@ -128,7 +128,7 @@ let board = Array(9).fill(null), phase = 'placement', turn = 'X';
 let selected = null, gameOver = false, winningLine = [];
 
 let livekitRoom = null;
-let isMicMuted = true; // Starts muted!
+let isMicMuted = true; 
 
 const savedName = localStorage.getItem('myGameUsername');
 if (savedName) {
@@ -159,6 +159,9 @@ socket.on('match-found', ({ roomId: rid, symbol, myName, opponentName, livekitTo
   myNameEl.textContent = myName;
   oppNameEl.textContent = opponentName;
   
+  // Show mic button IMMEDIATELY so you can see it
+  micBtn.style.display = 'flex';
+  
   connectVoice(livekitToken);
 });
 
@@ -167,41 +170,43 @@ async function connectVoice(token) {
     const LivekitClient = window.LivekitClient;
     livekitRoom = new LivekitClient.Room();
     
+    statusEl.textContent = 'Requesting mic...';
     await navigator.mediaDevices.getUserMedia({ audio: true });
     
+    statusEl.textContent = 'Connecting voice...';
     await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token, {
       rtcConfig: {
-        iceTransportPolicy: 'relay' // Bypasses VPN blocks
+        iceTransportPolicy: 'relay'
       }
     });
     
     await livekitRoom.localParticipant.setMicrophoneEnabled(false);
     
-    micBtn.style.display = 'flex';
+    statusEl.textContent = 'Connected! Tap 🎤 to talk.';
     micBtn.textContent = '🔇';
+    micBtn.classList.remove('error');
     micBtn.classList.add('muted');
 
-    // Attach opponent's voice to our dedicated <audio> tag
     livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
       if (track.kind === 'audio') {
         const audioEl = document.getElementById('remote-audio');
         track.attach(audioEl);
-        audioEl.play().catch(e => console.log("Audio play blocked by browser:", e));
+        audioEl.play().catch(e => console.log("Audio play blocked:", e));
       }
-    });
-
-    livekitRoom.on(LivekitClient.RoomEvent.ParticipantDisconnected, () => {
-      statusEl.textContent = 'Opponent left voice chat.';
     });
 
   } catch (err) {
     console.error("Voice connection failed:", err);
-    statusEl.textContent = 'Voice chat failed to connect.';
+    
+    // If it fails, show an X on the button so you know what happened
+    micBtn.textContent = '❌';
+    micBtn.classList.add('error');
+    statusEl.textContent = 'Voice failed. Check VPN settings.';
   }
 }
 
 micBtn.onclick = async () => {
-  if (!livekitRoom) return;
+  if (!livekitRoom || micBtn.classList.contains('error')) return;
   isMicMuted = !isMicMuted;
   await livekitRoom.localParticipant.setMicrophoneEnabled(!isMicMuted);
   
