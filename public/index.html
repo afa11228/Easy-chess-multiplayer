@@ -77,7 +77,7 @@
 <body>
   <h1>Easy Chess Multiplayer</h1>
   
-  <!-- Added a hidden container for audio tracks -->
+  <!-- Hidden container for audio tracks -->
   <div id="audio-container" style="display:none;"></div>
 
   <div id="game-header">
@@ -160,7 +160,6 @@ socket.on('match-found', ({ roomId: rid, symbol, myName, opponentName, livekitTo
   myNameEl.textContent = myName;
   oppNameEl.textContent = opponentName;
   
-  // Show mic button IMMEDIATELY so you can see it
   micBtn.style.display = 'flex';
   
   connectVoice(livekitToken);
@@ -175,7 +174,8 @@ async function connectVoice(token) {
     await navigator.mediaDevices.getUserMedia({ audio: true });
     
     statusEl.textContent = 'Connecting voice...';
-    // FIXED: Removed the 'relay' setting so it connects properly!
+    
+    // REMOVED the 'relay' restriction so it can connect normally
     await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token);
     
     await livekitRoom.localParticipant.setMicrophoneEnabled(false);
@@ -185,7 +185,6 @@ async function connectVoice(token) {
     micBtn.classList.remove('error');
     micBtn.classList.add('muted');
 
-    // FIXED: Better audio attaching logic
     livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
       if (track.kind === 'audio') {
         const audioEl = track.attach();
@@ -197,17 +196,17 @@ async function connectVoice(token) {
   } catch (err) {
     console.error("Voice connection failed:", err);
     
-    // If it fails, show an X on the button so you know what happened
+    // THIS IS THE NEW ERROR MESSAGE
     micBtn.textContent = '❌';
     micBtn.classList.add('error');
-    statusEl.textContent = 'Voice failed. Check mic permissions.';
+    statusEl.textContent = 'Error: ' + err.name + ' - ' + err.message;
   }
 }
 
 micBtn.onclick = async () => {
   if (!livekitRoom || micBtn.classList.contains('error')) return;
   
-  // FIXED: Unlock the browser's audio player when they tap the button
+  // Unlock audio playback when tapping the mic
   try {
     await livekitRoom.startAudio();
   } catch (e) {
