@@ -77,7 +77,8 @@
 <body>
   <h1>Easy Chess Multiplayer</h1>
   
-  <audio id="remote-audio" autoplay playsinline style="display:none;"></audio>
+  <!-- Added a hidden container for audio tracks -->
+  <div id="audio-container" style="display:none;"></div>
 
   <div id="game-header">
     You: <span id="my-name">...</span> vs Opponent: <span id="opp-name">...</span>
@@ -174,11 +175,8 @@ async function connectVoice(token) {
     await navigator.mediaDevices.getUserMedia({ audio: true });
     
     statusEl.textContent = 'Connecting voice...';
-    await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token, {
-      rtcConfig: {
-        iceTransportPolicy: 'relay'
-      }
-    });
+    // FIXED: Removed the 'relay' setting so it connects properly!
+    await livekitRoom.connect('wss://easy-chess-uamjn03l.livekit.cloud', token);
     
     await livekitRoom.localParticipant.setMicrophoneEnabled(false);
     
@@ -187,11 +185,12 @@ async function connectVoice(token) {
     micBtn.classList.remove('error');
     micBtn.classList.add('muted');
 
+    // FIXED: Better audio attaching logic
     livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
       if (track.kind === 'audio') {
-        const audioEl = document.getElementById('remote-audio');
-        track.attach(audioEl);
-        audioEl.play().catch(e => console.log("Audio play blocked:", e));
+        const audioEl = track.attach();
+        audioEl.autoplay = true;
+        document.getElementById('audio-container').appendChild(audioEl);
       }
     });
 
@@ -201,12 +200,20 @@ async function connectVoice(token) {
     // If it fails, show an X on the button so you know what happened
     micBtn.textContent = '❌';
     micBtn.classList.add('error');
-    statusEl.textContent = 'Voice failed. Check VPN settings.';
+    statusEl.textContent = 'Voice failed. Check mic permissions.';
   }
 }
 
 micBtn.onclick = async () => {
   if (!livekitRoom || micBtn.classList.contains('error')) return;
+  
+  // FIXED: Unlock the browser's audio player when they tap the button
+  try {
+    await livekitRoom.startAudio();
+  } catch (e) {
+    console.log("Audio unlock failed", e);
+  }
+
   isMicMuted = !isMicMuted;
   await livekitRoom.localParticipant.setMicrophoneEnabled(!isMicMuted);
   
